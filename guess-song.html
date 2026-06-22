@@ -67,11 +67,18 @@
   .countbar{width:100%;max-width:300px;height:8px;background:#0d1017;border-radius:99px;overflow:hidden}
   .countbar > i{display:block;height:100%;width:100%;background:var(--ok);transform-origin:left}
 
-  .controls{display:grid;grid-template-columns:1fr 1fr;gap:12px;width:100%}
+  .controls{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;width:100%}
+  .btn-stop{background:#3a2030;color:var(--accent2);border:1px solid var(--accent2);padding:16px;font-size:1rem}
   .btn-replay{background:#23344a;color:var(--ink);padding:16px;font-size:1rem}
   .btn-next{background:var(--accent2);color:#2b0008;padding:16px;font-size:1rem}
   .btn-wide{grid-column:1 / -1;background:#1a2030;color:var(--dim);
         border:1px solid var(--line);padding:11px;font-size:.78rem;letter-spacing:.1em;text-transform:uppercase}
+
+  .seg{display:none;align-items:center;justify-content:center;gap:16px;width:100%}
+  .seg .segval{font-size:.8rem;letter-spacing:.12em;color:var(--dim)}
+  .seg .segval b{color:var(--accent);font-size:1.1rem}
+  .step{width:42px;height:42px;border-radius:50%;background:#1a2030;
+        border:1px solid var(--line);color:var(--ink);font-size:1.4rem;line-height:1}
 
   .meta{font-size:.72rem;color:var(--dim);letter-spacing:.1em}
   .err{color:var(--accent2);font-size:.8rem;margin-top:12px;min-height:1em;text-align:center}
@@ -116,7 +123,13 @@
       <span class="lbl" id="state">準備</span>
     </div>
     <div class="countbar" id="cbar"><i id="bar"></i></div>
+    <div class="seg" id="segctl">
+      <button class="step" id="segDown">−</button>
+      <span class="segval"><b id="segNum">10</b> 秒／段</span>
+      <button class="step" id="segUp">+</button>
+    </div>
     <div class="controls" id="ctrls">
+      <button class="btn-stop" id="stop">⏹ 停止</button>
       <button class="btn-replay" id="replay">↺ 重播</button>
       <button class="btn-next" id="next">下一首 ▶</button>
       <button class="btn-wide" id="quit">結束 · 返回設定</button>
@@ -194,7 +207,7 @@
           // show start button; user tap unlocks mobile playback
           $("begin").style.display="block";
           buzz.style.display="none"; $("cbar").style.display="none";
-          $("ctrls").style.display="none"; meta.textContent="";
+          $("ctrls").style.display="none"; $("segctl").style.display="none"; meta.textContent="";
         }else if(tries>25){
           clearInterval(poll);
           errEl.textContent="載入失敗：清單為空、不公開，或載入逾時。請重試。";
@@ -263,10 +276,15 @@
 
   function stopSegment(){
     clearTimers();
-    player.pauseVideo();
+    if(player&&player.pauseVideo) player.pauseVideo();
     buzz.classList.remove("live");
     stateEl.textContent="已停止";
     countEl.textContent="?";
+    // freeze progress bar where it is
+    var w=bar.getBoundingClientRect().width;
+    var full=bar.parentElement.getBoundingClientRect().width||1;
+    bar.style.transition="none";
+    bar.style.transform="scaleX("+(w/full)+")";
   }
 
   function clearTimers(){
@@ -279,9 +297,18 @@
   $("begin").onclick=function(){
     $("begin").style.display="none";
     buzz.style.display="flex"; $("cbar").style.display="block";
-    $("ctrls").style.display="grid";
+    $("ctrls").style.display="grid"; $("segctl").style.display="flex";
+    $("segNum").textContent=segSec;
     nextSong();
   };
+  $("stop").onclick=function(){ stopSegment(); };
+  function setSeg(v){
+    segSec=Math.min(60,Math.max(1,v));
+    $("segNum").textContent=segSec;
+    if($("dur")) $("dur").value=segSec;
+  }
+  $("segDown").onclick=function(){ setSeg(segSec-5); };
+  $("segUp").onclick=function(){ setSeg(segSec+5); };
   $("replay").onclick=function(){ playSegment(false); };
   $("next").onclick=function(){ nextSong(); };
   $("quit").onclick=function(){
