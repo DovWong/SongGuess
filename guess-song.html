@@ -67,12 +67,18 @@
   .countbar{width:100%;max-width:300px;height:8px;background:#0d1017;border-radius:99px;overflow:hidden}
   .countbar > i{display:block;height:100%;width:100%;background:var(--ok);transform-origin:left}
 
-  .controls{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;width:100%}
+  .controls{display:grid;grid-template-columns:1fr 1fr;gap:12px;width:100%}
   .btn-stop{background:#3a2030;color:var(--accent2);border:1px solid var(--accent2);padding:16px;font-size:1rem}
   .btn-replay{background:#23344a;color:var(--ink);padding:16px;font-size:1rem}
   .btn-next{background:var(--accent2);color:#2b0008;padding:16px;font-size:1rem}
+  .btn-answer{background:var(--ok);color:#04241a;padding:16px;font-size:1rem}
   .btn-wide{grid-column:1 / -1;background:#1a2030;color:var(--dim);
         border:1px solid var(--line);padding:11px;font-size:.78rem;letter-spacing:.1em;text-transform:uppercase}
+  .answerbox{display:none;width:100%;background:#0d1017;border:1px solid var(--ok);
+        border-radius:10px;padding:12px 14px;color:var(--ok);font-size:.9rem;
+        line-height:1.5;word-break:break-word}
+  .answerbox.on{display:block}
+  .answerbox a{color:var(--accent);text-decoration:none}
 
   .seg{display:none;align-items:center;justify-content:center;gap:16px;width:100%}
   .seg .segval{font-size:.8rem;letter-spacing:.12em;color:var(--dim)}
@@ -129,11 +135,13 @@
       <button class="step" id="segUp">+</button>
     </div>
     <div class="controls" id="ctrls">
-      <button class="btn-stop" id="stop">⏹ 停止</button>
+      <button class="btn-stop" id="pause">⏸ 暫停</button>
       <button class="btn-replay" id="replay">↺ 重播</button>
       <button class="btn-next" id="next">下一首 ▶</button>
+      <button class="btn-answer" id="answer">👁 答案</button>
       <button class="btn-wide" id="quit">結束 · 返回設定</button>
     </div>
+    <div class="answerbox" id="answerbox"></div>
     <div class="meta" id="meta"></div>
   </div>
 
@@ -226,6 +234,8 @@
     idx++;
     if(idx>=order.length){ order=shuffle(order); idx=0; }
     meta.textContent="第 "+(idx+1)+" / "+order.length+" 首";
+    $("answerbox").classList.remove("on");
+    $("answerbox").innerHTML="";
     playSegment(true);
   }
 
@@ -257,34 +267,72 @@
     beginCountdown();
   }
 
-  function beginCountdown(){
-    buzz.classList.add("live");
-    stateEl.textContent="播放中";
-    var remain=segSec;
-    countEl.textContent=remain;
-    bar.style.transition="none"; bar.style.transform="scaleX(1)";
-    // force reflow then animate bar over segSec
-    void bar.offsetWidth;
-    bar.style.transition="transform "+segSec+"s linear";
-    bar.style.transform="scaleX(0)";
+  var _remain=0, _tickStart=0, paused=false;
 
-    ticker=setInterval(function(){
-      remain--; if(remain>=0) countEl.textContent=remain;
-    },1000);
-    timer=setTimeout(stopSegment,segSec*1000);
+  function beginCountdown(){
+    paused=false;
+    _remain=segSec;
+    runCountdown(true);
   }
 
-  function stopSegment(){
+  // resume=true: fresh segment (bar full→empty over segSec)
+  // resume=false: continue from _remain (used after pause)
+  function runCountdown(fresh){
+    buzz.classList.add("live");
+    stateEl.textContent="播放中";
+    countEl.textContent=Math.ceil(_remain);
+    setPauseLabel(false);
+
+    var frac=_remain/segSec; // portion of bar still to drain
+    bar.style.transition="none";
+    bar.style.transform="scaleX("+frac+")";
+    void bar.offsetWidth;
+    bar.style.transition="transform "+_remain+"s linear";
+    bar.style.transform="scaleX(0)";
+
+    _tickStart=Date.now();
+    ticker=setInterval(function(){
+      var left=_remain-(Date.now()-_tickStart)/1000;
+      if(left>=0) countEl.textContent=Math.ceil(left);
+    },200);
+    timer=setTimeout(segmentEnd,_remain*1000);
+  }
+
+  function pauseToggle(){
+    if(paused){ // resume
+      paused=false;
+      if(player&&player.playVideo) player.playVideo();
+      runCountdown(false);
+    }else{ // pause
+      paused=true;
+      clearTimers();
+      _remain=Math.max(0,_remain-(Date.now()-_tickStart)/1000);
+      if(player&&player.pauseVideo) player.pauseVideo();
+      buzz.classList.remove("live");
+      stateEl.textContent="已暫停";
+      // freeze bar
+      var w=bar.getBoundingClientRect().width;
+      var full=bar.parentElement.getBoundingClientRect().width||1;
+      bar.style.transition="none";
+      bar.style.transform="scaleX("+(w/full)+")";
+      setPauseLabel(true);
+    }
+  }
+
+  function setPauseLabel(isPaused){
+    $("pause").textContent=isPaused?"▶ 繼續":"⏸ 暫停";
+  }
+
+  // segment timer ran out
+  function segmentEnd(){
     clearTimers();
+    paused=false; _remain=0;
     if(player&&player.pauseVideo) player.pauseVideo();
     buzz.classList.remove("live");
-    stateEl.textContent="已停止";
+    stateEl.textContent="完畢";
     countEl.textContent="?";
-    // freeze progress bar where it is
-    var w=bar.getBoundingClientRect().width;
-    var full=bar.parentElement.getBoundingClientRect().width||1;
-    bar.style.transition="none";
-    bar.style.transform="scaleX("+(w/full)+")";
+    bar.style.transition="none"; bar.style.transform="scaleX(0)";
+    setPauseLabel(false);
   }
 
   function clearTimers(){
@@ -301,14 +349,26 @@
     $("segNum").textContent=segSec;
     nextSong();
   };
-  $("stop").onclick=function(){ stopSegment(); };
+  $("pause").onclick=function(){ pauseToggle(); };
+  $("answer").onclick=function(){
+    var box=$("answerbox");
+    if(box.classList.contains("on")){ box.classList.remove("on"); return; }
+    var d=player.getVideoData&&player.getVideoData();
+    var title=(d&&d.title)?d.title:"（無法取得歌名）";
+    var url=player.getVideoUrl?player.getVideoUrl():"";
+    box.innerHTML="🎵 "+escapeHtml(title)+
+      (url?(' · <a href="'+url+'" target="_blank" rel="noopener">YouTube</a>'):"");
+    box.classList.add("on");
+  };
+  function escapeHtml(s){return s.replace(/[&<>"]/g,function(c){
+    return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
   function setSeg(v){
     segSec=Math.min(60,Math.max(1,v));
     $("segNum").textContent=segSec;
     if($("dur")) $("dur").value=segSec;
   }
-  $("segDown").onclick=function(){ setSeg(segSec-5); };
-  $("segUp").onclick=function(){ setSeg(segSec+5); };
+  $("segDown").onclick=function(){ setSeg(segSec-1); };
+  $("segUp").onclick=function(){ setSeg(segSec+1); };
   $("replay").onclick=function(){ playSegment(false); };
   $("next").onclick=function(){ nextSong(); };
   $("quit").onclick=function(){
